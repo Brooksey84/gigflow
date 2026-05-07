@@ -222,7 +222,7 @@ async function callAPI(system, userMsg, maxTokens) {
 let currentSong = null, currentLine = 0, totalLines = 0;
 let micActive = false, audioCtx = null, analyser = null, micStream = null;
 let animFrame = null, semitoneOffset = 0, silenceTimer = null, isVoiceActive = false;
-const SILENCE_THRESHOLD = 18, ADVANCE_SILENCE_MS = 2200;
+const SILENCE_THRESHOLD = 5, ADVANCE_SILENCE_MS = 1500;
 
 function transposeChord(chord, semitones) {
   if (!chord || semitones === 0) return chord;
