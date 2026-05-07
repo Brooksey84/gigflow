@@ -211,8 +211,11 @@ async function callAPI(system, userMsg, maxTokens) {
       messages: [{ role: 'user', content: userMsg }]
     })
   });
+  console.log('Status:', resp.status);
+  const text = await resp.text();
+  console.log('Response:', text);
   if (!resp.ok) throw new Error('API error: ' + resp.status);
-  const data = await resp.json();
+  const data = JSON.parse(text);
   return data.content[0].text;
 }
 
