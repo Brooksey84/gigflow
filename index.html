@@ -201,7 +201,7 @@ const NOTE_ALTS = {'Db':'C#','Eb':'D#','Fb':'E','Gb':'F#','Ab':'G#','Bb':'A#','C
 
 // API calls now go through the Netlify proxy — no key needed here
 async function callAPI(system, userMsg, maxTokens) {
-  const resp = await fetch('/api/proxy', {
+  const resp = await fetch('/.netlify/functions/proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
