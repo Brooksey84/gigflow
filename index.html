@@ -476,23 +476,26 @@ function monitorAudio() {
   document.getElementById('vol-fill').style.width = Math.min(100, (avg / 60) * 100) + '%';
 
   const now = Date.now();
-  const isSounding = avg > onsetThreshold;
+    const isSounding = avg > onsetThreshold;
 
   if (isSounding) {
-    // Sound detected — mark phrase as active, cancel any pending advance
-    if (!phraseActive) phraseActive = true;
+    if (!phraseActive) {
+      // New phrase onset detected — advance immediately
+      phraseActive = true;
+      const now2 = Date.now();
+      if (now2 - lastAdvanceTime > onsetCooldown) {
+        lastAdvanceTime = now2;
+        advanceLine();
+      }
+    }
+    // Reset silence timer whenever sound is present
     if (phraseEndTimer) { clearTimeout(phraseEndTimer); phraseEndTimer = null; }
-  } else if (phraseActive) {
-    // Sound just stopped — start countdown to advance
-    if (!phraseEndTimer) {
+  } else {
+    // Silence — mark phrase as ended after short gap
+    if (phraseActive && !phraseEndTimer) {
       phraseEndTimer = setTimeout(() => {
-        phraseEndTimer = null;
         phraseActive = false;
-        const timeSinceLast = now - lastAdvanceTime;
-        if (timeSinceLast > onsetCooldown) {
-          lastAdvanceTime = Date.now();
-          advanceLine();
-        }
+        phraseEndTimer = null;
       }, PHRASE_END_MS);
     }
   }
