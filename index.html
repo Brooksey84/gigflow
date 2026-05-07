@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fretboard — Live Performance</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --accent: #e8ff47;
+    --text: #f0f0f0;
+    --muted: #888;
+    --chord: #e8ff47;
+    --current-bg: rgba(232,255,71,0.07);
+    --current-border: rgba(232,255,71,0.3);
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Space Mono', monospace; overflow: hidden; }
+  #app { display: flex; flex-direction: column; height: 100vh; max-width: 520px; margin: 0 auto; }
+
+  #search-screen { flex: 1; display: flex; flex-direction: column; padding: 24px 16px; overflow-y: auto; }
+
+  .logo { text-align: center; margin: 40px 0 48px; }
+  .logo-text { font-family: 'Instrument Serif', serif; font-size: 38px; letter-spacing: -1px; color: var(--text); }
+  .logo-accent { color: var(--accent); }
+  .logo-sub { font-size: 10px; letter-spacing: 4px; color: var(--muted); text-transform: uppercase; margin-top: 6px; }
+
+  .search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+  .search-bar input {
+    flex: 1; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 13px 16px; color: var(--text);
+    font-family: 'Space Mono', monospace; font-size: 13px; outline: none;
+    transition: border-color 0.2s; -webkit-appearance: none;
+  }
+  .search-bar input:focus { border-color: var(--accent); }
+  .search-bar input::placeholder { color: var(--muted); }
+  .search-bar button {
+    background: var(--accent); color: #000; border: none; border-radius: 8px;
+    padding: 13px 18px; cursor: pointer; font-family: 'Space Mono', monospace;
+    font-size: 12px; font-weight: 700; transition: opacity 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .search-bar button:hover { opacity: 0.85; }
+  .search-bar button:active { opacity: 0.7; }
+
+  .result-item {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; margin-bottom: 8px; cursor: pointer;
+    transition: border-color 0.2s, background 0.2s; -webkit-tap-highlight-color: transparent;
+  }
+  .result-item:hover { border-color: rgba(232,255,71,0.3); background: var(--surface2); }
+  .result-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .result-artist { font-size: 11px; color: var(--muted); }
+  .result-key { font-size: 10px; color: var(--accent); margin-top: 4px; letter-spacing: 1px; text-transform: uppercase; }
+
+  .loading-msg { text-align: center; color: var(--muted); font-size: 12px; padding: 40px; }
+  .loading-dots::after { content: '...'; animation: dots 1.2s infinite; }
+  @keyframes dots { 0%,20%{content:'.'} 40%,60%{content:'..'} 80%,100%{content:'...'} }
+
+  .empty-state { text-align: center; padding: 56px 24px; color: var(--muted); }
+  .empty-icon { font-size: 48px; margin-bottom: 16px; opacity: 0.35; }
+  .empty-state p { font-size: 12px; line-height: 2; }
+
+  #perf-screen { flex: 1; display: none; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  .perf-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border);
+    background: var(--surface); flex-shrink: 0;
+  }
+  .back-btn {
+    background: none; border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 7px 11px; cursor: pointer; font-size: 18px;
+    line-height: 1; transition: border-color 0.2s; -webkit-tap-highlight-color: transparent;
+  }
+  .back-btn:hover { border-color: var(--accent); }
+  .perf-title-block { flex: 1; min-width: 0; }
+  .perf-song { font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .perf-artist { font-size: 10px; color: var(--muted); margin-top: 2px; }
+  #key-display { font-size: 11px; color: var(--accent); letter-spacing: 1px; flex-shrink: 0; }
+
+  .mic-btn {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; cursor: pointer; color: var(--text);
+    font-size: 18px; transition: all 0.2s; min-width: 46px; text-align: center;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .mic-btn.active { background: rgba(232,255,71,0.15); border-color: var(--accent); }
+  .mic-btn.listening { animation: pulse 1.5s ease-in-out infinite; }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(232,255,71,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(232,255,71,0); }
+  }
+
+  #lyrics-container { flex: 1; overflow-y: auto; padding: 16px; -webkit-overflow-scrolling: touch; }
+
+  .song-section { margin-bottom: 8px; }
+  .section-label { font-size: 9px; letter-spacing: 3px; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; padding: 0 4px; }
+
+  .lyric-line {
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 4px;
+    border: 1px solid transparent; cursor: pointer; transition: all 0.3s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .lyric-line:hover { background: rgba(255,255,255,0.03); border-color: var(--border); }
+  .lyric-line.current { background: var(--current-bg); border-color: var(--current-border); }
+  .lyric-line.next { opacity: 0.7; }
+  .lyric-line.past { opacity: 0.3; }
+  .lyric-line.future { opacity: 0.5; }
+
+  .chord-row { position: relative; min-height: 22px; margin-bottom: 3px; }
+  .chord-token { position: absolute; font-size: 13px; font-weight: 700; color: var(--chord); letter-spacing: 0.5px; white-space: nowrap; }
+  .lyric-text { font-family: 'Instrument Serif', serif; font-size: 19px; line-height: 1.4; color: var(--text); }
+  .lyric-line.current .lyric-text { color: #fff; }
+
+  .transpose-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .transpose-label { font-size: 10px; color: var(--muted); flex: 1; }
+  .t-btn {
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 12px; cursor: pointer;
+    font-family: 'Space Mono', monospace; font-size: 12px; transition: all 0.2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .t-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .t-btn:active { background: rgba(232,255,71,0.1); }
+  #semitone-display { font-size: 11px; color: var(--accent); min-width: 32px; text-align: center; }
+
+  .status-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border);
+    font-size: 10px; color: var(--muted); flex-shrink: 0;
+  }
+  .status-mic { display: flex; align-items: center; gap: 6px; }
+  .vol-bar { width: 72px; height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
+  .vol-fill { height: 100%; background: var(--accent); transition: width 0.1s; border-radius: 2px; width: 0%; }
+  .auto-label { font-size: 10px; color: var(--muted); }
+  .auto-label.on { color: var(--accent); }
+  .progress-info { font-size: 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="search-screen">
+    <div class="logo">
+      <div class="logo-text">Fret<span class="logo-accent">board</span></div>
+      <div class="logo-sub">Live Performance Mode</div>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Song title + artist..." autocomplete="off" />
+      <button onclick="doSearch()">Search</button>
+    </div>
+    <div id="results">
+      <div class="empty-state">
+        <div class="empty-icon">🎸</div>
+        <p>Search for any song to get<br>chords + lyrics for live play</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="perf-screen">
+    <div class="perf-header">
+      <button class="back-btn" onclick="goBack()">←</button>
+      <div class="perf-title-block">
+        <div class="perf-song" id="perf-song-title">—</div>
+        <div class="perf-artist" id="perf-song-artist">—</div>
+      </div>
+      <span id="key-display">—</span>
+      <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
+    </div>
+    <div id="lyrics-container"></div>
+    <div class="transpose-row">
+      <span class="transpose-label">Transpose</span>
+      <button class="t-btn" onclick="transpose(-1)">♭ Down</button>
+      <span id="semitone-display">0</span>
+      <button class="t-btn" onclick="transpose(1)">♯ Up</button>
+    </div>
+    <div class="status-bar">
+      <div class="status-mic">
+        <span>Mic</span>
+        <div class="vol-bar"><div class="vol-fill" id="vol-fill"></div></div>
+      </div>
+      <div class="progress-info" id="progress-info">— / —</div>
+      <div class="auto-label" id="auto-label">auto: off</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const NOTE_ALTS = {'Db':'C#','Eb':'D#','Fb':'E','Gb':'F#','Ab':'G#','Bb':'A#','Cb':'B'};
+
+// API calls now go through the Netlify proxy — no key needed here
+async function callAPI(system, userMsg, maxTokens) {
+  const resp = await fetch('/api/proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: userMsg }]
+    })
+  });
+  if (!resp.ok) throw new Error('API error: ' + resp.status);
+  const data = await resp.json();
+  return data.content[0].text;
+}
+
+let currentSong = null, currentLine = 0, totalLines = 0;
+let micActive = false, audioCtx = null, analyser = null, micStream = null;
+let animFrame = null, semitoneOffset = 0, silenceTimer = null, isVoiceActive = false;
+const SILENCE_THRESHOLD = 18, ADVANCE_SILENCE_MS = 2200;
+
+function transposeChord(chord, semitones) {
+  if (!chord || semitones === 0) return chord;
+  const m = chord.match(/^([A-G][#b]?)(.*)/);
+  if (!m) return chord;
+  let rawNote = NOTE_ALTS[m[1]] || m[1];
+  const idx = NOTES.indexOf(rawNote);
+  if (idx === -1) return chord;
+  const newIdx = ((idx + semitones) % 12 + 12) % 12;
+  let result = NOTES[newIdx];
+  if (m[2].startsWith('/')) {
+    const bm = m[2].match(/^\/([A-G][#b]?)(.*)/);
+    if (bm) {
+      let bass = NOTE_ALTS[bm[1]] || bm[1];
+      const bIdx = NOTES.indexOf(bass);
+      if (bIdx !== -1) return result + '/' + NOTES[((bIdx + semitones) % 12 + 12) % 12] + bm[2];
+    }
+  }
+  return result + m[2];
+}
+
+function getKeyDisplay(k) {
+  if (!k) return '?';
+  const m = k.match(/^([A-G][#b]?)(.*)/);
+  if (!m) return k;
+  let root = NOTE_ALTS[m[1]] || m[1];
+  const idx = NOTES.indexOf(root);
+  if (idx === -1) return k;
+  return NOTES[((idx + semitoneOffset) % 12 + 12) % 12] + m[2];
+}
+
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+  const resultsDiv = document.getElementById('results');
+  resultsDiv.innerHTML = '<div class="loading-msg"><span class="loading-dots">Searching</span></div>';
+  try {
+    const text = await callAPI(
+      `You are a music data API. Return ONLY a valid JSON array, no markdown. Up to 4 matching songs: [{"title":string,"artist":string,"key":string,"capo":number}]. If no match return [].`,
+      `Search: "${q}"`, 800
+    );
+    const songs = JSON.parse(text.replace(/```json|```/g,'').trim());
+    window._searchResults = songs;
+    if (!songs.length) {
+      resultsDiv.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><p>No results found.<br>Try a different search.</p></div>';
+      return;
+    }
+    resultsDiv.innerHTML = songs.map((s,i) => `
+      <div class="result-item" onclick="loadSong(${i})">
+        <div class="result-title">${s.title}</div>
+        <div class="result-artist">${s.artist}</div>
+        <div class="result-key">Key: ${s.key}${s.capo ? ' · Capo '+s.capo : ''}</div>
+      </div>`).join('');
+  } catch(e) {
+    resultsDiv.innerHTML = '<div class="empty-state"><p>Search failed. Please try again.</p></div>';
+    console.error(e);
+  }
+}
+
+async function loadSong(idx) {
+  const song = window._searchResults[idx];
+  semitoneOffset = 0;
+  document.getElementById('semitone-display').textContent = '0';
+  document.getElementById('perf-song-title').textContent = song.title;
+  document.getElementById('perf-song-artist').textContent = song.artist;
+  document.getElementById('search-screen').style.display = 'none';
+  document.getElementById('perf-screen').style.display = 'flex';
+  document.getElementById('lyrics-container').innerHTML = '<div class="loading-msg"><span class="loading-dots">Loading chords</span></div>';
+  try {
+    const text = await callAPI(
+      `You are a chord/lyric chart generator. Return ONLY valid JSON, no markdown.
+Format: {"title":string,"artist":string,"key":string,"capo":number,"sections":[{"label":string,"lines":[{"chords":[{"chord":string,"position":number}],"lyric":string}]}]}
+Position = character index in lyric. Include Intro,Verse,Chorus,Bridge,Outro as needed. At least 24 lines. Use accurate chords.`,
+      `Chart for: "${song.title}" by ${song.artist}. Key: ${song.key}${song.capo?', Capo: '+song.capo:''}`,
+      3000
+    );
+    currentSong = JSON.parse(text.replace(/```json|```/g,'').trim());
+    currentLine = 0;
+    renderSong();
+  } catch(e) {
+    document.getElementById('lyrics-container').innerHTML = '<div class="empty-state"><p>Failed to load song.<br>Please try again.</p></div>';
+    console.error(e);
+  }
+}
+
+function renderSong() {
+  if (!currentSong) return;
+  document.getElementById('key-display').textContent = getKeyDisplay(currentSong.key);
+  const allLines = [];
+  currentSong.sections.forEach(s => s.lines.forEach(l => allLines.push(l)));
+  totalLines = allLines.length;
+  updateProgressInfo();
+  const container = document.getElementById('lyrics-container');
+  container.innerHTML = '';
+  let lineIdx = 0;
+  currentSong.sections.forEach(sec => {
+    const secDiv = document.createElement('div');
+    secDiv.className = 'song-section';
+    const label = document.createElement('div');
+    label.className = 'section-label';
+    label.textContent = sec.label;
+    secDiv.appendChild(label);
+    sec.lines.forEach(line => {
+      const li = lineIdx;
+      const lineDiv = document.createElement('div');
+      lineDiv.className = 'lyric-line ' + getLineClass(li);
+      lineDiv.id = 'line-' + li;
+      lineDiv.addEventListener('click', () => { currentLine = li; updateHighlight(); });
+      const chordRow = document.createElement('div');
+      chordRow.className = 'chord-row';
+      (line.chords||[]).forEach(c => {
+        const span = document.createElement('span');
+        span.className = 'chord-token';
+        span.textContent = transposeChord(c.chord, semitoneOffset);
+        span.style.left = (c.position * 10.5) + 'px';
+        chordRow.appendChild(span);
+      });
+      const lyricDiv = document.createElement('div');
+      lyricDiv.className = 'lyric-text';
+      lyricDiv.textContent = line.lyric || '';
+      lineDiv.appendChild(chordRow);
+      lineDiv.appendChild(lyricDiv);
+      secDiv.appendChild(lineDiv);
+      lineIdx++;
+    });
+    container.appendChild(secDiv);
+  });
+  scrollToCurrentLine();
+}
+
+function getLineClass(i) {
+  if (i === currentLine) return 'current';
+  if (i === currentLine+1) return 'next';
+  if (i < currentLine) return 'past';
+  return 'future';
+}
+
+function updateHighlight() {
+  document.querySelectorAll('.lyric-line').forEach((el,i) => { el.className = 'lyric-line ' + getLineClass(i); });
+  updateProgressInfo();
+  scrollToCurrentLine();
+}
+
+function updateProgressInfo() {
+  document.getElementById('progress-info').textContent = (currentLine+1) + ' / ' + totalLines;
+}
+
+function scrollToCurrentLine() {
+  const el = document.getElementById('line-' + currentLine);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function transpose(semitones) {
+  semitoneOffset = Math.max(-6, Math.min(6, semitoneOffset + semitones));
+  document.getElementById('semitone-display').textContent = (semitoneOffset > 0 ? '+' : '') + semitoneOffset;
+  renderSong();
+}
+
+function goBack() {
+  stopMic();
+  document.getElementById('perf-screen').style.display = 'none';
+  document.getElementById('search-screen').style.display = 'flex';
+}
+
+async function toggleMic() {
+  if (micActive) { stopMic(); return; }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.6;
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    micActive = true;
+    isVoiceActive = false;
+    document.getElementById('mic-btn').classList.add('active','listening');
+    document.getElementById('auto-label').textContent = 'auto: on';
+    document.getElementById('auto-label').classList.add('on');
+    monitorAudio();
+  } catch(e) {
+    alert('Microphone access denied. Allow mic access in browser settings.');
+  }
+}
+
+function stopMic() {
+  micActive = false; isVoiceActive = false;
+  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  if (animFrame) cancelAnimationFrame(animFrame);
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  document.getElementById('mic-btn').classList.remove('active','listening');
+  document.getElementById('auto-label').textContent = 'auto: off';
+  document.getElementById('auto-label').classList.remove('on');
+  document.getElementById('vol-fill').style.width = '0%';
+}
+
+function monitorAudio() {
+  if (!micActive) return;
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(buf);
+  let sum = 0;
+  const end = Math.floor(buf.length * 0.6);
+  for (let i = 4; i < end; i++) sum += buf[i];
+  const avg = sum / (end - 4);
+  document.getElementById('vol-fill').style.width = Math.min(100, (avg/80)*100) + '%';
+  if (avg > SILENCE_THRESHOLD) {
+    isVoiceActive = true;
+    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  } else if (isVoiceActive && !silenceTimer) {
+    silenceTimer = setTimeout(() => {
+      if (isVoiceActive && micActive) { isVoiceActive = false; advanceLine(); }
+      silenceTimer = null;
+    }, ADVANCE_SILENCE_MS);
+  }
+  animFrame = requestAnimationFrame(monitorAudio);
+}
+
+function advanceLine() {
+  if (currentLine < totalLines - 1) { currentLine++; updateHighlight(); }
+}
+
+document.addEventListener('keydown', e => {
+  if (document.getElementById('perf-screen').style.display !== 'none') {
+    if (e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); advanceLine(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); if (currentLine > 0) { currentLine--; updateHighlight(); } }
+  }
+});
+document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
+</script>
+</body>
+</html>
