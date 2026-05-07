@@ -142,10 +142,26 @@
   }
   .status-mic { display: flex; align-items: center; gap: 6px; }
   .vol-bar { width: 72px; height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
-  .vol-fill { height: 100%; background: var(--accent); transition: width 0.1s; border-radius: 2px; width: 0%; }
+  .vol-fill { height: 100%; background: var(--accent); transition: width 0.05s; border-radius: 2px; width: 0%; }
   .auto-label { font-size: 10px; color: var(--muted); }
   .auto-label.on { color: var(--accent); }
   .progress-info { font-size: 10px; color: var(--muted); }
+
+  /* Sensitivity slider */
+  .sens-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 16px;
+    background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .sens-label { font-size: 10px; color: var(--muted); min-width: 72px; }
+  input[type=range] {
+    flex: 1; -webkit-appearance: none; height: 4px;
+    background: var(--surface2); border-radius: 2px; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: var(--accent); cursor: pointer;
+  }
+  #sens-value { font-size: 10px; color: var(--accent); min-width: 24px; text-align: right; }
 </style>
 </head>
 <body>
@@ -178,6 +194,11 @@
       <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
     </div>
     <div id="lyrics-container"></div>
+    <div class="sens-row">
+      <span class="sens-label">Sensitivity</span>
+      <input type="range" id="sens-slider" min="1" max="10" value="5" oninput="updateSensitivity(this.value)">
+      <span id="sens-value">5</span>
+    </div>
     <div class="transpose-row">
       <span class="transpose-label">Transpose</span>
       <button class="t-btn" onclick="transpose(-1)">♭ Down</button>
@@ -199,7 +220,6 @@
 const NOTES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const NOTE_ALTS = {'Db':'C#','Eb':'D#','Fb':'E','Gb':'F#','Ab':'G#','Bb':'A#','Cb':'B'};
 
-// API calls now go through the Netlify proxy — no key needed here
 async function callAPI(system, userMsg, maxTokens) {
   const resp = await fetch('/.netlify/functions/proxy', {
     method: 'POST',
@@ -211,18 +231,31 @@ async function callAPI(system, userMsg, maxTokens) {
       messages: [{ role: 'user', content: userMsg }]
     })
   });
-  console.log('Status:', resp.status);
-  const text = await resp.text();
-  console.log('Response:', text);
   if (!resp.ok) throw new Error('API error: ' + resp.status);
-  const data = JSON.parse(text);
+  const data = await resp.json();
   return data.content[0].text;
 }
 
 let currentSong = null, currentLine = 0, totalLines = 0;
 let micActive = false, audioCtx = null, analyser = null, micStream = null;
-let animFrame = null, semitoneOffset = 0, silenceTimer = null, isVoiceActive = false;
-const SILENCE_THRESHOLD = 5, ADVANCE_SILENCE_MS = 1500;
+let animFrame = null, semitoneOffset = 0;
+
+// Voice onset detection state
+let sensitivity = 5;
+let onsetThreshold = 15;       // volume level that counts as "sound"
+let onsetCooldown = 1200;      // ms to wait before advancing again
+let lastAdvanceTime = 0;
+let phraseActive = false;
+let phraseEndTimer = null;
+let PHRASE_END_MS = 600;       // ms of silence after a phrase before advancing
+
+function updateSensitivity(val) {
+  sensitivity = parseInt(val);
+  document.getElementById('sens-value').textContent = val;
+  // Higher sensitivity = lower threshold needed
+  onsetThreshold = Math.max(2, 20 - (sensitivity * 1.8));
+  PHRASE_END_MS = Math.max(300, 900 - (sensitivity * 60));
+}
 
 function transposeChord(chord, semitones) {
   if (!chord || semitones === 0) return chord;
@@ -392,12 +425,15 @@ async function toggleMic() {
   try {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Resume context in case it's suspended (iOS requirement)
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
     analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 512;
-    analyser.smoothingTimeConstant = 0.6;
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = 0.4;
     audioCtx.createMediaStreamSource(micStream).connect(analyser);
     micActive = true;
-    isVoiceActive = false;
+    phraseActive = false;
+    lastAdvanceTime = 0;
     document.getElementById('mic-btn').classList.add('active','listening');
     document.getElementById('auto-label').textContent = 'auto: on';
     document.getElementById('auto-label').classList.add('on');
@@ -408,8 +444,9 @@ async function toggleMic() {
 }
 
 function stopMic() {
-  micActive = false; isVoiceActive = false;
-  if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+  micActive = false;
+  phraseActive = false;
+  if (phraseEndTimer) { clearTimeout(phraseEndTimer); phraseEndTimer = null; }
   if (animFrame) cancelAnimationFrame(animFrame);
   if (micStream) micStream.getTracks().forEach(t => t.stop());
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
@@ -421,27 +458,53 @@ function stopMic() {
 
 function monitorAudio() {
   if (!micActive) return;
+
   const buf = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(buf);
+
+  // Focus on vocal frequency range (roughly 200hz–3000hz)
+  const binCount = analyser.frequencyBinCount;
+  const sampleRate = audioCtx.sampleRate;
+  const lowBin = Math.floor(200 / (sampleRate / analyser.fftSize));
+  const highBin = Math.floor(3000 / (sampleRate / analyser.fftSize));
+
   let sum = 0;
-  const end = Math.floor(buf.length * 0.6);
-  for (let i = 4; i < end; i++) sum += buf[i];
-  const avg = sum / (end - 4);
-  document.getElementById('vol-fill').style.width = Math.min(100, (avg/80)*100) + '%';
-  if (avg > SILENCE_THRESHOLD) {
-    isVoiceActive = true;
-    if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-  } else if (isVoiceActive && !silenceTimer) {
-    silenceTimer = setTimeout(() => {
-      if (isVoiceActive && micActive) { isVoiceActive = false; advanceLine(); }
-      silenceTimer = null;
-    }, ADVANCE_SILENCE_MS);
+  for (let i = lowBin; i < highBin; i++) sum += buf[i];
+  const avg = sum / (highBin - lowBin);
+
+  // Show volume
+  document.getElementById('vol-fill').style.width = Math.min(100, (avg / 60) * 100) + '%';
+
+  const now = Date.now();
+  const isSounding = avg > onsetThreshold;
+
+  if (isSounding) {
+    // Sound detected — mark phrase as active, cancel any pending advance
+    if (!phraseActive) phraseActive = true;
+    if (phraseEndTimer) { clearTimeout(phraseEndTimer); phraseEndTimer = null; }
+  } else if (phraseActive) {
+    // Sound just stopped — start countdown to advance
+    if (!phraseEndTimer) {
+      phraseEndTimer = setTimeout(() => {
+        phraseEndTimer = null;
+        phraseActive = false;
+        const timeSinceLast = now - lastAdvanceTime;
+        if (timeSinceLast > onsetCooldown) {
+          lastAdvanceTime = Date.now();
+          advanceLine();
+        }
+      }, PHRASE_END_MS);
+    }
   }
+
   animFrame = requestAnimationFrame(monitorAudio);
 }
 
 function advanceLine() {
-  if (currentLine < totalLines - 1) { currentLine++; updateHighlight(); }
+  if (currentLine < totalLines - 1) {
+    currentLine++;
+    updateHighlight();
+  }
 }
 
 document.addEventListener('keydown', e => {
